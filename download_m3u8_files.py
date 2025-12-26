@@ -2,142 +2,183 @@ import asyncio
 import aiohttp
 import aiofiles
 import json
+import logging
 import re
 import random
 from pathlib import Path
 from urllib.parse import urlparse
 
 # ---------------------------
+# LOGGING
+# ---------------------------
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s | %(levelname)s | %(message)s",
+)
+log = logging.getLogger("m3u8-dl")
+
+# ---------------------------
 # CONFIG
 # ---------------------------
 INPUT_JSON = Path("show_m3u8_links.json")
 BASE_DIR = Path("m3u8_files")
-MAX_CONCURRENT = 5   # adjust concurrency
+
+REQUEST_TIMEOUT = 30
+INITIAL_CONCURRENCY = 5
+MAX_CONCURRENCY = 10
+MIN_CONCURRENCY = 1
+CONCURRENCY_STEP = 1
+MAX_PASSES = 5
+
 JITTER_MIN, JITTER_MAX = 0.2, 0.6
 RETRIES = 3
-TIMEOUT = 30
 
 # ---------------------------
-# SAFE FILENAME
-# ---------------------------
-def safe_name(title):
-    return re.sub(r"[^a-zA-Z0-9]+", "_", title).strip("_")
+def safe_name(text: str) -> str:
+    return re.sub(r"[^a-zA-Z0-9]+", "_", text).strip("_")
 
-# ---------------------------
-# REWRITE M3U8 FILE
 # ---------------------------
 async def rewrite_m3u8(path: Path, host: str):
     async with aiofiles.open(path, "r", encoding="utf-8") as f:
         lines = (await f.read()).splitlines()
-    out = []
-    vod_inserted = False
 
-    for i, line in enumerate(lines):
-        line = line.strip()
-        if i == 0 and line == "#EXTM3U":
-            out.append(line)
-            continue
-        if not vod_inserted and line.startswith("#EXT-X-VERSION"):
+    out = []
+    vod_added = False
+
+    for line in lines:
+        if not vod_added and line.startswith("#EXT-X-VERSION"):
             out.append(line)
             out.append("#EXT-X-PLAYLIST-TYPE:VOD")
-            vod_inserted = True
+            vod_added = True
             continue
+
         if line.startswith("/") and not line.startswith("//"):
             out.append(host + line)
         else:
             out.append(line)
 
-    if not vod_inserted:
+    if not vod_added:
         out.insert(1, "#EXT-X-PLAYLIST-TYPE:VOD")
 
     async with aiofiles.open(path, "w", encoding="utf-8") as f:
         await f.write("\n".join(out) + "\n")
 
 # ---------------------------
-# DOWNLOAD SINGLE EPISODE
-# ---------------------------
-async def download_episode(session, url, outpath: Path):
+async def download_m3u8(session, url, outpath: Path):
     parsed = urlparse(url)
     host = f"{parsed.scheme}://{parsed.netloc}"
 
     headers = {
-        "User-Agent": "Mozilla/5.0 (X11; Linux x86_64) "
-                      "AppleWebKit/537.36 (KHTML, like Gecko) "
-                      "Chrome/120.0.0.0 Safari/537.36",
+        "User-Agent": "Mozilla/5.0",
         "Referer": host,
         "Origin": host,
-        "Accept": "*/*",
-        "Accept-Language": "en-US,en;q=0.9",
     }
 
-    for attempt in range(RETRIES):
+    for attempt in range(1, RETRIES + 1):
         try:
-            async with session.get(url, headers=headers, timeout=TIMEOUT) as resp:
+            async with session.get(url, headers=headers) as resp:
                 if resp.status != 200:
-                    raise aiohttp.ClientError(f"Status {resp.status}")
+                    raise aiohttp.ClientError(f"HTTP {resp.status}")
+
                 data = await resp.read()
                 async with aiofiles.open(outpath, "wb") as f:
                     await f.write(data)
+
                 return host
+
         except Exception as e:
-            if attempt < RETRIES - 1:
+            if attempt < RETRIES:
                 await asyncio.sleep(random.uniform(JITTER_MIN, JITTER_MAX))
             else:
                 raise e
 
 # ---------------------------
-# PROCESS SINGLE EPISODE
+async def process_episode(sema, session, job, results):
+    async with sema:
+        channel, show, episode, info = job
+
+        if not info or "m3u8_url" not in info:
+            results[job] = False
+            return
+
+        folder = BASE_DIR / safe_name(channel) / safe_name(show)
+        folder.mkdir(parents=True, exist_ok=True)
+
+        outpath = folder / (safe_name(episode) + ".m3u8")
+
+        try:
+            await asyncio.sleep(random.uniform(JITTER_MIN, JITTER_MAX))
+            host = await download_m3u8(session, info["m3u8_url"], outpath)
+            await rewrite_m3u8(outpath, host)
+            results[job] = True
+        except Exception:
+            results[job] = False
+
 # ---------------------------
-async def process_episode(session, channel, show, episode_title, info):
-    if not info or "m3u8_url" not in info:
-        print(f"✖ Skipping {episode_title} (no m3u8)")
-        return
+async def adaptive_runner(jobs):
+    concurrency = INITIAL_CONCURRENCY
+    pending = jobs
+    passes = 0
 
-    m3u8_url = info["m3u8_url"]
-    filename = safe_name(episode_title) + ".m3u8"
-    folder = BASE_DIR / safe_name(channel) / safe_name(show)
-    folder.mkdir(parents=True, exist_ok=True)
-    outpath = folder / filename
+    timeout = aiohttp.ClientTimeout(total=REQUEST_TIMEOUT)
+    connector = aiohttp.TCPConnector(limit_per_host=concurrency)
 
-    await asyncio.sleep(random.uniform(JITTER_MIN, JITTER_MAX))  # jitter
-    try:
-        print(f"⬇️ {episode_title}")
-        host = await download_episode(session, m3u8_url, outpath)
-        await rewrite_m3u8(outpath, host)
-        print(f"✅ Saved → {outpath}")
-    except Exception as e:
-        print(f"✖ Failed {episode_title}: {e}")
+    async with aiohttp.ClientSession(timeout=timeout, connector=connector) as session:
+        while pending and passes < MAX_PASSES:
+            passes += 1
+            total = len(pending)
+            results = {}
 
-# ---------------------------
-# MAIN
+            log.info("=" * 60)
+            log.info(f"PASS {passes}")
+            log.info(f"Concurrency: {concurrency}")
+            log.info(f"Total episodes: {total}")
+
+            sema = asyncio.Semaphore(concurrency)
+
+            await asyncio.gather(*[
+                process_episode(sema, session, job, results)
+                for job in pending
+            ])
+
+            failed = [job for job, ok in results.items() if not ok]
+            success = total - len(failed)
+
+            log.info(f"Success: {success}")
+            log.info(f"Failed: {len(failed)}")
+
+            if success == total and concurrency < MAX_CONCURRENCY:
+                concurrency += CONCURRENCY_STEP
+                log.info(f"Increasing concurrency → {concurrency}")
+            elif success < total and concurrency > MIN_CONCURRENCY:
+                concurrency -= CONCURRENCY_STEP
+                log.info(f"Decreasing concurrency → {concurrency}")
+
+            pending = failed
+
+        if pending:
+            log.warning(f"Unresolved after {MAX_PASSES} passes: {len(pending)}")
+        else:
+            log.info("All episodes downloaded")
+
 # ---------------------------
 async def main():
     if not INPUT_JSON.exists():
-        print(f"⚠️ {INPUT_JSON} not found")
+        log.error("show_m3u8_links.json not found")
         return
 
-    with open(INPUT_JSON, "r", encoding="utf-8") as f:
+    with INPUT_JSON.open("r", encoding="utf-8") as f:
         data = json.load(f)
 
-    connector = aiohttp.TCPConnector(limit_per_host=MAX_CONCURRENT)
-    timeout = aiohttp.ClientTimeout(total=TIMEOUT)
-    async with aiohttp.ClientSession(connector=connector, timeout=timeout) as session:
-        tasks = []
-        for channel, shows in data.items():
-            for show, episodes in shows.items():
-                for episode_title, info in episodes.items():
-                    tasks.append(
-                        process_episode(session, channel, show, episode_title, info)
-                    )
+    jobs = []
+    for channel, shows in data.items():
+        for show, episodes in shows.items():
+            for episode, info in episodes.items():
+                jobs.append((channel, show, episode, info))
 
-        # Limit concurrency
-        sem = asyncio.Semaphore(MAX_CONCURRENT)
+    log.info(f"Total episodes queued: {len(jobs)}")
+    await adaptive_runner(jobs)
 
-        async def sem_task(task):
-            async with sem:
-                await task
-
-        await asyncio.gather(*(sem_task(t) for t in tasks))
-
+# ---------------------------
 if __name__ == "__main__":
     asyncio.run(main())
