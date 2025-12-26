@@ -34,11 +34,11 @@ async def extract_m3u8(page, url: str):
     try:
         await page.goto(url, wait_until="domcontentloaded", timeout=60_000)
 
-        # give player time to mount
+        # allow player to mount
         await page.wait_for_timeout(400)
 
-        # single center click to trigger playback
-        vp = await page.viewport_size()
+        # single center click
+        vp = page.viewport_size
         if vp:
             await page.mouse.click(vp["width"] // 2, vp["height"] // 2)
 
@@ -70,7 +70,7 @@ async def process_episode(
         try:
             ordered = list(players.items())
 
-            # prioritize previously successful player per domain
+            # prioritize known-good player
             for i, (pname, url) in enumerate(ordered):
                 if domain_cache.get(get_domain(url)) == pname:
                     ordered.insert(0, ordered.pop(i))
@@ -96,7 +96,6 @@ async def process_episode(
 async def adaptive_runner(context, episodes, results, domain_cache):
     concurrency = INITIAL_CONCURRENCY
     passes = 0
-
     pending = episodes
 
     while pending and passes < MAX_PASSES:
@@ -122,7 +121,6 @@ async def adaptive_runner(context, episodes, results, domain_cache):
             if not data or "m3u8_url" not in data:
                 failed.append((ch, sh, ep, players))
 
-        # adaptive concurrency tuning
         success = len(pending) - len(failed)
 
         if success == len(pending) and concurrency < MAX_CONCURRENCY:
@@ -143,7 +141,7 @@ async def main():
         player_data = json.load(f)
 
     results = {}
-    domain_cache = {}  # MUST be dict
+    domain_cache = {}
 
     async with async_playwright() as p:
         browser = await p.chromium.launch(
@@ -174,7 +172,6 @@ async def main():
                     episodes.append((channel, show, ep, players))
 
         await adaptive_runner(context, episodes, results, domain_cache)
-
         await browser.close()
 
     with OUTPUT_JSON.open("w", encoding="utf-8") as f:
