@@ -1,0 +1,64 @@
+name: Update M3U8 Playlists
+
+on:
+  schedule:
+    - cron: "*/30 * * * *"   # every 30 minutes
+  workflow_dispatch:
+
+jobs:
+  run:
+    runs-on: ubuntu-latest
+
+    permissions:
+      contents: write
+
+    steps:
+      - name: Checkout repo
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install system deps
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y curl
+
+      - name: Install Python dependencies
+        run: |
+          pip install --upgrade pip
+          pip install -r requirements.txt
+
+      - name: Install Playwright Chromium
+        run: |
+          playwright install chromium
+
+      - name: Generate player links
+        run: |
+          python generate_players.py
+
+      - name: Extract m3u8 links
+        run: |
+          python extract_m3u8.py
+
+      - name: Download and rewrite m3u8 files
+        run: |
+          python download_m3u8_files.py
+
+      - name: Cleanup old m3u8 files
+        run: |
+          python cleanup_old_m3u8.py
+
+      - name: Generate master playlist
+        run: |
+          python generate_playlist.py
+
+      - name: Commit and push changes
+        run: |
+          git config user.name "github-actions"
+          git config user.email "github-actions@github.com"
+          git add .
+          git commit -m "auto: update m3u8 files and playlists" || echo "No changes"
+          git push
