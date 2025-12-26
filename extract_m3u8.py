@@ -9,7 +9,7 @@ OUTPUT_JSON = Path("show_m3u8_links.json")
 
 FAST_TIMEOUT = 2000
 SLOW_TIMEOUT = 8000
-MAX_CONCURRENCY = 4  # safe for GitHub Actions
+MAX_CONCURRENCY = 8  # safe for GitHub Actions
 
 # ---------------------------
 def get_domain(url):
