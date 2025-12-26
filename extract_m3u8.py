@@ -3,17 +3,15 @@ import json
 from pathlib import Path
 from urllib.parse import urlparse
 from playwright.async_api import async_playwright
-from collections import deque
 
 PLAYER_JSON = Path("player_links.json")
 OUTPUT_JSON = Path("show_m3u8_links.json")
 
-# ---------------------------
-REQUEST_TIMEOUT = 8000  # max time per request in ms
+REQUEST_TIMEOUT = 8000  # 8 seconds
 INITIAL_CONCURRENCY = 4
 MAX_CONCURRENCY = 8
 MIN_CONCURRENCY = 1
-CONCURRENCY_STEP = 1  # how much to increase/decrease per pass
+CONCURRENCY_STEP = 1
 MAX_PASSES = 5  # fail-safe to avoid infinite loops
 
 # ---------------------------
@@ -48,6 +46,8 @@ async def process_episode(sema, context, channel, show, episode, players, result
         try:
             found = False
             ordered_players = list(players.items())
+
+            # prioritize player used previously
             for i, (pname, url) in enumerate(ordered_players):
                 if domain_cache.get(get_domain(url)) == pname:
                     ordered_players.insert(0, ordered_players.pop(i))
@@ -73,41 +73,34 @@ async def process_episode(sema, context, channel, show, episode, players, result
                 await page.close()
 
 # ---------------------------
-async def adaptive_runner(context, episodes_queue, results, domain_cache):
+async def adaptive_runner(context, episodes_list, results, domain_cache):
     concurrency = INITIAL_CONCURRENCY
     pass_count = 0
 
-    while episodes_queue and pass_count < MAX_PASSES:
+    while episodes_list and pass_count < MAX_PASSES:
         sema = asyncio.Semaphore(concurrency)
-        current_batch = []
+        tasks = []
 
-        # take up to concurrency episodes from queue
-        for _ in range(min(len(episodes_queue), concurrency)):
-            current_batch.append(episodes_queue.popleft())
+        for ch, sh, ep, players in episodes_list:
+            tasks.append(process_episode(sema, context, ch, sh, ep, players, results, domain_cache))
 
-        tasks = [
-            process_episode(sema, context, ch, sh, ep, players, results, domain_cache)
-            for ch, sh, ep, players in current_batch
-        ]
         await asyncio.gather(*tasks)
 
-        # collect failed episodes
+        # collect failed episodes for next pass
         failed = []
-        for ch, sh, ep, players in current_batch:
+        for ch, sh, ep, players in episodes_list:
             data = results[ch][sh][ep]
             if not data or "m3u8_url" not in data:
                 failed.append((ch, sh, ep, players))
 
-        # re-add failed to queue
-        episodes_queue.extend(failed)
+        # adjust concurrency
+        success_count = len(episodes_list) - len(failed)
+        if success_count == len(episodes_list) and concurrency < MAX_CONCURRENCY:
+            concurrency += CONCURRENCY_STEP
+        elif success_count < len(episodes_list) and concurrency > MIN_CONCURRENCY:
+            concurrency -= CONCURRENCY_STEP
 
-        # adjust concurrency based on success rate
-        success_count = len(current_batch) - len(failed)
-        if success_count == len(current_batch) and concurrency < MAX_CONCURRENCY:
-            concurrency += CONCURRENCY_STEP  # speed up
-        elif success_count < len(current_batch) and concurrency > MIN_CONCURRENCY:
-            concurrency -= CONCURRENCY_STEP  # slow down
-
+        episodes_list = failed
         pass_count += 1
 
 # ---------------------------
@@ -143,18 +136,15 @@ async def main():
             viewport={"width": 1366, "height": 768},
         )
 
-        # ---------------- Prepare episodes queue
-        episodes_queue = deque()
+        episodes_list = []
         for channel, shows in player_data.items():
             results.setdefault(channel, {})
             for show, episodes in shows.items():
                 results[channel].setdefault(show, {})
                 for episode, players in episodes.items():
-                    episodes_queue.append((channel, show, episode, players))
+                    episodes_list.append((channel, show, episode, players))
 
-        # ---------------- Run adaptive concurrency multi-pass
-        await adaptive_runner(context, episodes_queue, results, domain_cache)
-
+        await adaptive_runner(context, episodes_list, results, domain_cache)
         await browser.close()
 
     # ---------------- Save results
