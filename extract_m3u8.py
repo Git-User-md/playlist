@@ -9,7 +9,7 @@ OUTPUT_JSON = Path("show_m3u8_links.json")
 
 FAST_TIMEOUT = 2000
 SLOW_TIMEOUT = 8000
-MAX_CONCURRENCY = 8  # safe for GitHub Actions
+MAX_CONCURRENCY = 4  # safe for GitHub Actions
 
 # ---------------------------
 def get_domain(url):
@@ -54,32 +54,33 @@ async def process_episode(
             found = False
 
             ordered_players = list(players.items())
-            # Prioritize last successful player for this domain
             for i, (pname, url) in enumerate(ordered_players):
                 if domain_cache.get(get_domain(url)) == pname:
                     ordered_players.insert(0, ordered_players.pop(i))
                     break
 
-            # Keep retrying until a valid m3u8 is found
-            while not found:
-                for player_name, url in ordered_players:
-                    print(f"  trying: {player_name} (fast)")
-                    m3u8s = await extract_m3u8(page, url, FAST_TIMEOUT)
+            for player_name, url in ordered_players:
+                print(f"  trying: {player_name} (fast)")
+                m3u8s = await extract_m3u8(page, url, FAST_TIMEOUT)
 
-                    if not m3u8s:
-                        print(f"  retrying: {player_name} (slow)")
-                        m3u8s = await extract_m3u8(page, url, SLOW_TIMEOUT)
+                if not m3u8s:
+                    print(f"  retrying: {player_name} (slow)")
+                    m3u8s = await extract_m3u8(page, url, SLOW_TIMEOUT)
 
-                    if m3u8s:
-                        r = m3u8s[0]
-                        domain_cache[get_domain(url)] = player_name
-                        results[channel][show][episode] = {
-                            "m3u8_url": r.url,
-                            "player_used": player_name,
-                        }
-                        print("  ✔ m3u8 found")
-                        found = True
-                        break
+                if m3u8s:
+                    r = m3u8s[0]
+                    domain_cache[get_domain(url)] = player_name
+                    results[channel][show][episode] = {
+                        "m3u8_url": r.url,
+                        "player_used": player_name,
+                    }
+                    print("  ✔ m3u8 found")
+                    found = True
+                    break
+
+            if not found:
+                results[channel][show][episode] = None
+                print("  ✖ no m3u8 found")
 
         finally:
             if not page.is_closed():
@@ -119,29 +120,38 @@ async def main():
             viewport={"width": 1366, "height": 768},
         )
 
+        # ---------------- First pass: run all episodes in parallel
         tasks = []
-
         for channel, shows in player_data.items():
             results.setdefault(channel, {})
             for show, episodes in shows.items():
                 results[channel].setdefault(show, {})
                 for episode, players in episodes.items():
                     tasks.append(
-                        process_episode(
-                            sema,
-                            context,
-                            channel,
-                            show,
-                            episode,
-                            players,
-                            results,
-                            domain_cache,
-                        )
+                        process_episode(sema, context, channel, show, episode, players, results, domain_cache)
                     )
 
         await asyncio.gather(*tasks)
+
+        # ---------------- Retry only failed episodes
+        failed_episodes = []
+        for channel, shows in results.items():
+            for show, episodes in shows.items():
+                for ep, data in episodes.items():
+                    if not data or "m3u8_url" not in data:
+                        failed_episodes.append((channel, show, ep, player_data[channel][show][ep]))
+
+        if failed_episodes:
+            print("\nRetrying failed episodes...")
+            retry_tasks = [
+                process_episode(sema, context, ch, sh, ep, players, results, domain_cache)
+                for ch, sh, ep, players in failed_episodes
+            ]
+            await asyncio.gather(*retry_tasks)
+
         await browser.close()
 
+    # ---------------- Save results
     with OUTPUT_JSON.open("w", encoding="utf-8") as f:
         json.dump(results, f, indent=2)
 
