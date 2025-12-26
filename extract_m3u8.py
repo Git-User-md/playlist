@@ -9,7 +9,7 @@ OUTPUT_JSON = Path("show_m3u8_links.json")
 
 FAST_TIMEOUT = 2000
 SLOW_TIMEOUT = 8000
-MAX_CONCURRENCY = 4  # safe for GitHub Actions
+MAX_CONCURRENCY = 4  # safe on GitHub runners
 
 # ---------------------------
 def get_domain(url):
@@ -29,9 +29,9 @@ async def extract_m3u8(page, url, timeout_ms):
     try:
         await page.goto(url, wait_until="domcontentloaded", timeout=60000)
         req = await asyncio.wait_for(future, timeout_ms / 1000)
-        return [req]
+        return req
     except asyncio.TimeoutError:
-        return []
+        return None
     finally:
         if not page.is_closed():
             page.remove_listener("request", on_request)
@@ -54,24 +54,26 @@ async def process_episode(
             found = False
 
             ordered_players = list(players.items())
+
+            cached_player = None
             for i, (pname, url) in enumerate(ordered_players):
                 if domain_cache.get(get_domain(url)) == pname:
+                    cached_player = pname
                     ordered_players.insert(0, ordered_players.pop(i))
                     break
 
             for player_name, url in ordered_players:
-                print(f"  trying: {player_name} (fast)")
-                m3u8s = await extract_m3u8(page, url, FAST_TIMEOUT)
+                timeout = FAST_TIMEOUT if player_name == cached_player else SLOW_TIMEOUT
 
-                if not m3u8s:
-                    print(f"  retrying: {player_name} (slow)")
-                    m3u8s = await extract_m3u8(page, url, SLOW_TIMEOUT)
+                label = "fast" if timeout == FAST_TIMEOUT else "slow"
+                print(f"  trying: {player_name} ({label})")
 
-                if m3u8s:
-                    r = m3u8s[0]
+                req = await extract_m3u8(page, url, timeout)
+
+                if req:
                     domain_cache[get_domain(url)] = player_name
                     results[channel][show][episode] = {
-                        "m3u8_url": r.url,
+                        "m3u8_url": req.url,
                         "player_used": player_name,
                     }
                     print("  ✔ m3u8 found")
