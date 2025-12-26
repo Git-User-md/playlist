@@ -1,0 +1,27 @@
+{
+  "zee-tv": {
+    "channel_url": "https://www.desitellybox.to/zee-tv/",
+    "shows": [
+      "tum-se-tum-tak",
+      "ganga-mayi-ki-betiyan",
+      "ideabaaz",
+      "saru"
+    ]
+  },
+  "sab-tv": {
+    "channel_url": "https://www.desitellybox.to/sab-tv/",
+    "shows": [
+      "pushpa-impossible",
+      "taarak-mehta-ka-ooltah-chashmah",
+      "ganesh-kartikey"
+    ]
+  },
+  "and-tv": {
+    "channel_url": "https://www.desitellybox.to/and-tv/",
+    "shows": [
+      "happu-ki-ultan-paltan",
+      "bhabhiji-ghar-par-hain",
+      "gharwali-pedwali"
+    ]
+  }
+}
