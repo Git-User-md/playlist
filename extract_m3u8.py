@@ -7,12 +7,12 @@ from playwright.async_api import async_playwright
 PLAYER_JSON = Path("player_links.json")
 OUTPUT_JSON = Path("show_m3u8_links.json")
 
-REQUEST_TIMEOUT = 8000  # 8 seconds
+REQUEST_TIMEOUT = 8000  # 8 seconds hard limit
 INITIAL_CONCURRENCY = 4
 MAX_CONCURRENCY = 8
 MIN_CONCURRENCY = 1
 CONCURRENCY_STEP = 1
-MAX_PASSES = 5  # fail-safe to avoid infinite loops
+MAX_PASSES = 5  # fail-safe
 
 # ---------------------------
 def get_domain(url):
@@ -25,16 +25,27 @@ async def extract_m3u8(page, url, timeout_ms=REQUEST_TIMEOUT):
 
     def on_request(request):
         if request.url.lower().endswith(".m3u8") and not future.done():
-            future.set_result(request)
+            future.set_result(request.url)
 
     page.on("request", on_request)
 
     try:
         await page.goto(url, wait_until="domcontentloaded", timeout=60000)
-        req = await asyncio.wait_for(future, timeout_ms / 1000)
-        return [req]
+
+        # allow player JS to mount
+        await asyncio.sleep(0.5)
+
+        # single center click to trigger playback
+        box = page.viewport_size
+        if box:
+            await page.mouse.click(box["width"] // 2, box["height"] // 2)
+
+        m3u8_url = await asyncio.wait_for(future, timeout_ms / 1000)
+        return m3u8_url
+
     except asyncio.TimeoutError:
-        return []
+        return None
+
     finally:
         if not page.is_closed():
             page.remove_listener("request", on_request)
@@ -44,51 +55,41 @@ async def process_episode(sema, context, channel, show, episode, players, result
     async with sema:
         page = await context.new_page()
         try:
-            found = False
             ordered_players = list(players.items())
 
-            # prioritize player used previously
+            # prioritize cached domain
             for i, (pname, url) in enumerate(ordered_players):
                 if domain_cache.get(get_domain(url)) == pname:
                     ordered_players.insert(0, ordered_players.pop(i))
                     break
 
             for player_name, url in ordered_players:
-                m3u8s = await extract_m3u8(page, url)
-                if m3u8s:
-                    r = m3u8s[0]
+                m3u8 = await extract_m3u8(page, url)
+                if m3u8:
                     domain_cache[get_domain(url)] = player_name
                     results[channel][show][episode] = {
-                        "m3u8_url": r.url,
+                        "m3u8_url": m3u8,
                         "player_used": player_name,
                     }
-                    found = True
-                    break
+                    return
 
-            if not found:
-                results[channel][show][episode] = None
+            results[channel][show][episode] = None
 
         finally:
-            if not page.is_closed():
-                await page.close()
+            await page.close()
 
 # ---------------------------
 async def adaptive_runner(context, episodes_list, results, domain_cache):
     concurrency = INITIAL_CONCURRENCY
-    pass_count = 1
+    pass_count = 0
 
-    while episodes_list and pass_count <= MAX_PASSES:
+    while episodes_list and pass_count < MAX_PASSES:
         sema = asyncio.Semaphore(concurrency)
-        tasks = []
 
-        for ch, sh, ep, players in episodes_list:
-            tasks.append(
-                process_episode(
-                    sema, context, ch, sh, ep, players, results, domain_cache
-                )
-            )
-
-        await asyncio.gather(*tasks)
+        await asyncio.gather(*[
+            process_episode(sema, context, ch, sh, ep, players, results, domain_cache)
+            for ch, sh, ep, players in episodes_list
+        ])
 
         failed = []
         for ch, sh, ep, players in episodes_list:
@@ -96,19 +97,11 @@ async def adaptive_runner(context, episodes_list, results, domain_cache):
             if not data or "m3u8_url" not in data:
                 failed.append((ch, sh, ep, players))
 
-        success_count = len(episodes_list) - len(failed)
+        success = len(episodes_list) - len(failed)
 
-        # -------- LOGGING (ADDED)
-        print(f"\nPASS {pass_count}")
-        print(f"Concurrency: {concurrency}")
-        print(f"Total episodes: {len(episodes_list)}")
-        print(f"Success: {success_count}")
-        print(f"Failed: {len(failed)}")
-
-        # adaptive concurrency
-        if success_count == len(episodes_list) and concurrency < MAX_CONCURRENCY:
+        if success == len(episodes_list) and concurrency < MAX_CONCURRENCY:
             concurrency += CONCURRENCY_STEP
-        elif success_count < len(episodes_list) and concurrency > MIN_CONCURRENCY:
+        elif failed and concurrency > MIN_CONCURRENCY:
             concurrency -= CONCURRENCY_STEP
 
         episodes_list = failed
@@ -124,16 +117,15 @@ async def main():
         player_data = json.load(f)
 
     results = {}
-    domain_cache = {}
+    domain_cache = []
 
     async with async_playwright() as p:
         browser = await p.chromium.launch(
             headless=True,
             args=[
-                "--disable-blink-features=AutomationControlled",
-                "--disable-features=UserAgentClientHint",
                 "--no-sandbox",
                 "--disable-dev-shm-usage",
+                "--disable-blink-features=AutomationControlled",
             ],
         )
 
@@ -143,19 +135,18 @@ async def main():
                 "AppleWebKit/537.36 (KHTML, like Gecko) "
                 "Chrome/120.0.0.0 Safari/537.36"
             ),
-            locale="en-US",
             viewport={"width": 1366, "height": 768},
         )
 
-        episodes_list = []
-        for channel, shows in player_data.items():
-            results.setdefault(channel, {})
-            for show, episodes in shows.items():
-                results[channel].setdefault(show, {})
-                for episode, players in episodes.items():
-                    episodes_list.append((channel, show, episode, players))
+        episodes = []
+        for ch, shows in player_data.items():
+            results.setdefault(ch, {})
+            for sh, eps in shows.items():
+                results[ch].setdefault(sh, {})
+                for ep, players in eps.items():
+                    episodes.append((ch, sh, ep, players))
 
-        await adaptive_runner(context, episodes_list, results, domain_cache)
+        await adaptive_runner(context, episodes, results, domain_cache)
         await browser.close()
 
     with OUTPUT_JSON.open("w", encoding="utf-8") as f:
