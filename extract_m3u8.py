@@ -7,16 +7,14 @@ from playwright.async_api import async_playwright
 PLAYER_JSON = Path("player_links.json")
 OUTPUT_JSON = Path("show_m3u8_links.json")
 
-FAST_TIMEOUT = 2000
-SLOW_TIMEOUT = 8000
-MAX_CONCURRENCY = 4  # safe for GitHub Actions
+MAX_CONCURRENCY = 4  # adjust for GitHub Actions
 
 # ---------------------------
 def get_domain(url):
     return urlparse(url).netloc
 
 # ---------------------------
-async def extract_m3u8(page, url, timeout_ms):
+async def extract_m3u8(page, url):
     loop = asyncio.get_running_loop()
     future = loop.create_future()
 
@@ -28,7 +26,7 @@ async def extract_m3u8(page, url, timeout_ms):
 
     try:
         await page.goto(url, wait_until="domcontentloaded", timeout=60000)
-        req = await asyncio.wait_for(future, timeout_ms / 1000)
+        req = await future
         return [req]
     except asyncio.TimeoutError:
         return []
@@ -37,22 +35,11 @@ async def extract_m3u8(page, url, timeout_ms):
             page.remove_listener("request", on_request)
 
 # ---------------------------
-async def process_episode(
-    sema,
-    context,
-    channel,
-    show,
-    episode,
-    players,
-    results,
-    domain_cache,
-):
+async def process_episode(sema, context, channel, show, episode, players, results, domain_cache):
     async with sema:
         page = await context.new_page()
         try:
-            print(f"\n▶ {episode}")
             found = False
-
             ordered_players = list(players.items())
             for i, (pname, url) in enumerate(ordered_players):
                 if domain_cache.get(get_domain(url)) == pname:
@@ -60,13 +47,7 @@ async def process_episode(
                     break
 
             for player_name, url in ordered_players:
-                print(f"  trying: {player_name} (fast)")
-                m3u8s = await extract_m3u8(page, url, FAST_TIMEOUT)
-
-                if not m3u8s:
-                    print(f"  retrying: {player_name} (slow)")
-                    m3u8s = await extract_m3u8(page, url, SLOW_TIMEOUT)
-
+                m3u8s = await extract_m3u8(page, url)
                 if m3u8s:
                     r = m3u8s[0]
                     domain_cache[get_domain(url)] = player_name
@@ -74,13 +55,11 @@ async def process_episode(
                         "m3u8_url": r.url,
                         "player_used": player_name,
                     }
-                    print("  ✔ m3u8 found")
                     found = True
                     break
 
             if not found:
                 results[channel][show][episode] = None
-                print("  ✖ no m3u8 found")
 
         finally:
             if not page.is_closed():
@@ -109,7 +88,6 @@ async def main():
                 "--disable-dev-shm-usage",
             ],
         )
-
         context = await browser.new_context(
             user_agent=(
                 "Mozilla/5.0 (X11; Linux x86_64) "
@@ -120,34 +98,40 @@ async def main():
             viewport={"width": 1366, "height": 768},
         )
 
-        # ---------------- First pass: run all episodes in parallel
-        tasks = []
+        # Initialize results
         for channel, shows in player_data.items():
             results.setdefault(channel, {})
             for show, episodes in shows.items():
                 results[channel].setdefault(show, {})
-                for episode, players in episodes.items():
-                    tasks.append(
-                        process_episode(sema, context, channel, show, episode, players, results, domain_cache)
-                    )
+                for episode in episodes:
+                    results[channel][show][episode] = results[channel][show].get(episode, None)
 
-        await asyncio.gather(*tasks)
+        # ---------------- Multi-pass loop
+        remaining = [
+            (ch, sh, ep, player_data[ch][sh][ep])
+            for ch, shows in player_data.items()
+            for sh, eps in shows.items()
+            for ep in eps
+        ]
 
-        # ---------------- Retry only failed episodes
-        failed_episodes = []
-        for channel, shows in results.items():
-            for show, episodes in shows.items():
-                for ep, data in episodes.items():
-                    if not data or "m3u8_url" not in data:
-                        failed_episodes.append((channel, show, ep, player_data[channel][show][ep]))
-
-        if failed_episodes:
-            print("\nRetrying failed episodes...")
-            retry_tasks = [
+        pass_count = 1
+        while remaining:
+            print(f"\n=== Pass {pass_count} - {len(remaining)} episodes remaining ===")
+            tasks = [
                 process_episode(sema, context, ch, sh, ep, players, results, domain_cache)
-                for ch, sh, ep, players in failed_episodes
+                for ch, sh, ep, players in remaining
             ]
-            await asyncio.gather(*retry_tasks)
+            await asyncio.gather(*tasks)
+
+            # Update remaining list
+            remaining = [
+                (ch, sh, ep, player_data[ch][sh][ep])
+                for ch, shows in results.items()
+                for sh, eps in shows.items()
+                for ep, data in eps.items()
+                if not data or "m3u8_url" not in data
+            ]
+            pass_count += 1
 
         await browser.close()
 
