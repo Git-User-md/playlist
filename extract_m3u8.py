@@ -3,12 +3,18 @@ import json
 from pathlib import Path
 from urllib.parse import urlparse
 from playwright.async_api import async_playwright
+from collections import deque
 
 PLAYER_JSON = Path("player_links.json")
 OUTPUT_JSON = Path("show_m3u8_links.json")
 
-MAX_CONCURRENCY = 4  # safe for GitHub Actions
-REQUEST_TIMEOUT = 8000  # 8 seconds
+# ---------------------------
+REQUEST_TIMEOUT = 8000  # max time per request in ms
+INITIAL_CONCURRENCY = 4
+MAX_CONCURRENCY = 8
+MIN_CONCURRENCY = 1
+CONCURRENCY_STEP = 1  # how much to increase/decrease per pass
+MAX_PASSES = 5  # fail-safe to avoid infinite loops
 
 # ---------------------------
 def get_domain(url):
@@ -40,9 +46,7 @@ async def process_episode(sema, context, channel, show, episode, players, result
     async with sema:
         page = await context.new_page()
         try:
-            print(f"\n▶ {episode}")
             found = False
-
             ordered_players = list(players.items())
             for i, (pname, url) in enumerate(ordered_players):
                 if domain_cache.get(get_domain(url)) == pname:
@@ -50,9 +54,7 @@ async def process_episode(sema, context, channel, show, episode, players, result
                     break
 
             for player_name, url in ordered_players:
-                print(f"  trying: {player_name}")
                 m3u8s = await extract_m3u8(page, url)
-
                 if m3u8s:
                     r = m3u8s[0]
                     domain_cache[get_domain(url)] = player_name
@@ -60,17 +62,53 @@ async def process_episode(sema, context, channel, show, episode, players, result
                         "m3u8_url": r.url,
                         "player_used": player_name,
                     }
-                    print("  ✔ m3u8 found")
                     found = True
                     break
 
             if not found:
                 results[channel][show][episode] = None
-                print("  ✖ no m3u8 found")
 
         finally:
             if not page.is_closed():
                 await page.close()
+
+# ---------------------------
+async def adaptive_runner(context, episodes_queue, results, domain_cache):
+    concurrency = INITIAL_CONCURRENCY
+    pass_count = 0
+
+    while episodes_queue and pass_count < MAX_PASSES:
+        sema = asyncio.Semaphore(concurrency)
+        current_batch = []
+
+        # take up to concurrency episodes from queue
+        for _ in range(min(len(episodes_queue), concurrency)):
+            current_batch.append(episodes_queue.popleft())
+
+        tasks = [
+            process_episode(sema, context, ch, sh, ep, players, results, domain_cache)
+            for ch, sh, ep, players in current_batch
+        ]
+        await asyncio.gather(*tasks)
+
+        # collect failed episodes
+        failed = []
+        for ch, sh, ep, players in current_batch:
+            data = results[ch][sh][ep]
+            if not data or "m3u8_url" not in data:
+                failed.append((ch, sh, ep, players))
+
+        # re-add failed to queue
+        episodes_queue.extend(failed)
+
+        # adjust concurrency based on success rate
+        success_count = len(current_batch) - len(failed)
+        if success_count == len(current_batch) and concurrency < MAX_CONCURRENCY:
+            concurrency += CONCURRENCY_STEP  # speed up
+        elif success_count < len(current_batch) and concurrency > MIN_CONCURRENCY:
+            concurrency -= CONCURRENCY_STEP  # slow down
+
+        pass_count += 1
 
 # ---------------------------
 async def main():
@@ -83,7 +121,6 @@ async def main():
 
     results = {}
     domain_cache = {}
-    sema = asyncio.Semaphore(MAX_CONCURRENCY)
 
     async with async_playwright() as p:
         browser = await p.chromium.launch(
@@ -106,34 +143,17 @@ async def main():
             viewport={"width": 1366, "height": 768},
         )
 
-        # ---------------- First pass: run all episodes in parallel
-        tasks = []
+        # ---------------- Prepare episodes queue
+        episodes_queue = deque()
         for channel, shows in player_data.items():
             results.setdefault(channel, {})
             for show, episodes in shows.items():
                 results[channel].setdefault(show, {})
                 for episode, players in episodes.items():
-                    tasks.append(
-                        process_episode(sema, context, channel, show, episode, players, results, domain_cache)
-                    )
+                    episodes_queue.append((channel, show, episode, players))
 
-        await asyncio.gather(*tasks)
-
-        # ---------------- Retry only failed episodes
-        failed_episodes = []
-        for channel, shows in results.items():
-            for show, episodes in shows.items():
-                for ep, data in episodes.items():
-                    if not data or "m3u8_url" not in data:
-                        failed_episodes.append((channel, show, ep, player_data[channel][show][ep]))
-
-        if failed_episodes:
-            print("\nRetrying failed episodes...")
-            retry_tasks = [
-                process_episode(sema, context, ch, sh, ep, players, results, domain_cache)
-                for ch, sh, ep, players in failed_episodes
-            ]
-            await asyncio.gather(*retry_tasks)
+        # ---------------- Run adaptive concurrency multi-pass
+        await adaptive_runner(context, episodes_queue, results, domain_cache)
 
         await browser.close()
 
