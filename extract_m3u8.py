@@ -75,26 +75,37 @@ async def process_episode(sema, context, channel, show, episode, players, result
 # ---------------------------
 async def adaptive_runner(context, episodes_list, results, domain_cache):
     concurrency = INITIAL_CONCURRENCY
-    pass_count = 0
+    pass_count = 1
 
-    while episodes_list and pass_count < MAX_PASSES:
+    while episodes_list and pass_count <= MAX_PASSES:
         sema = asyncio.Semaphore(concurrency)
         tasks = []
 
         for ch, sh, ep, players in episodes_list:
-            tasks.append(process_episode(sema, context, ch, sh, ep, players, results, domain_cache))
+            tasks.append(
+                process_episode(
+                    sema, context, ch, sh, ep, players, results, domain_cache
+                )
+            )
 
         await asyncio.gather(*tasks)
 
-        # collect failed episodes for next pass
         failed = []
         for ch, sh, ep, players in episodes_list:
             data = results[ch][sh][ep]
             if not data or "m3u8_url" not in data:
                 failed.append((ch, sh, ep, players))
 
-        # adjust concurrency
         success_count = len(episodes_list) - len(failed)
+
+        # -------- LOGGING (ADDED)
+        print(f"\nPASS {pass_count}")
+        print(f"Concurrency: {concurrency}")
+        print(f"Total episodes: {len(episodes_list)}")
+        print(f"Success: {success_count}")
+        print(f"Failed: {len(failed)}")
+
+        # adaptive concurrency
         if success_count == len(episodes_list) and concurrency < MAX_CONCURRENCY:
             concurrency += CONCURRENCY_STEP
         elif success_count < len(episodes_list) and concurrency > MIN_CONCURRENCY:
@@ -147,7 +158,6 @@ async def main():
         await adaptive_runner(context, episodes_list, results, domain_cache)
         await browser.close()
 
-    # ---------------- Save results
     with OUTPUT_JSON.open("w", encoding="utf-8") as f:
         json.dump(results, f, indent=2)
 
