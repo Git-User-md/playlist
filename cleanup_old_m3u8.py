@@ -3,7 +3,7 @@ from datetime import datetime, timedelta
 import re
 
 BASE_DIR = Path("m3u8_files")
-KEEP_DAYS = 7
+KEEP_DAYS = 8
 
 # ---------------------------
 # DATE PARSER FROM FILENAME
