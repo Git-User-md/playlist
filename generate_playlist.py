@@ -63,7 +63,7 @@ def main():
             continue
 
         channel = rel_parts[0]
-        show = rel_parts[2]
+        show = rel_parts[1]
         group_title = f"{channel}/{show}"
 
         title = m3u8.stem.replace("_", " ")
