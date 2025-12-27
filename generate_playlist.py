@@ -58,9 +58,14 @@ def main():
         if not date or date < cutoff:
             continue
 
-        channel = m3u8.parents[-3].name
-        show = m3u8.parents[-2].name
+        rel_parts = m3u8.relative_to(BASE_DIR).parts
+        if len(rel_parts) < 3:
+            continue
+
+        channel = rel_parts[0]
+        show = rel_parts[1]
         group_title = f"{channel}/{show}"
+
         title = m3u8.stem.replace("_", " ")
 
         entries.append({
@@ -80,8 +85,8 @@ def main():
             )
             f.write(e["url"] + "\n\n")
 
-    print(f"✅ Playlist generated: {OUTPUT_M3U}")
-    print(f"🎯 Entries: {len(entries)}")
+    print(f"Playlist generated: {OUTPUT_M3U}")
+    print(f"Entries: {len(entries)}")
 
 # ---------------------------
 if __name__ == "__main__":
