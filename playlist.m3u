@@ -1,5 +1,8 @@
 #EXTM3U
 
+#EXTINF:-1 group-title="zee_tv/tum_se_tum_tak",Tum Se Tum Tak 27th December 2025 Watch Online
+https://raw.githubusercontent.com/Git-User-md/playlist/main/m3u8_files/zee_tv/tum_se_tum_tak/Tum_Se_Tum_Tak_27th_December_2025_Watch_Online.m3u8
+
 #EXTINF:-1 group-title="zee_tv/tum_se_tum_tak",Tum Se Tum Tak 26th December 2025 Watch Online
 https://raw.githubusercontent.com/Git-User-md/playlist/main/m3u8_files/zee_tv/tum_se_tum_tak/Tum_Se_Tum_Tak_26th_December_2025_Watch_Online.m3u8
 
@@ -20,6 +23,9 @@ https://raw.githubusercontent.com/Git-User-md/playlist/main/m3u8_files/zee_tv/tu
 
 #EXTINF:-1 group-title="zee_tv/tum_se_tum_tak",Tum Se Tum Tak 20th December 2025 Watch Online
 https://raw.githubusercontent.com/Git-User-md/playlist/main/m3u8_files/zee_tv/tum_se_tum_tak/Tum_Se_Tum_Tak_20th_December_2025_Watch_Online.m3u8
+
+#EXTINF:-1 group-title="sab_tv/taarak_mehta_ka_ooltah_chashmah",Taarak Mehta Ka Ooltah Chashmah 27th December 2025 Watch Online
+https://raw.githubusercontent.com/Git-User-md/playlist/main/m3u8_files/sab_tv/taarak_mehta_ka_ooltah_chashmah/Taarak_Mehta_Ka_Ooltah_Chashmah_27th_December_2025_Watch_Online.m3u8
 
 #EXTINF:-1 group-title="sab_tv/taarak_mehta_ka_ooltah_chashmah",Taarak Mehta Ka Ooltah Chashmah 26th December 2025 Watch Online
 https://raw.githubusercontent.com/Git-User-md/playlist/main/m3u8_files/sab_tv/taarak_mehta_ka_ooltah_chashmah/Taarak_Mehta_Ka_Ooltah_Chashmah_26th_December_2025_Watch_Online.m3u8
@@ -108,6 +114,9 @@ https://raw.githubusercontent.com/Git-User-md/playlist/main/m3u8_files/and_tv/ha
 #EXTINF:-1 group-title="and_tv/gharwali_pedwali",Gharwali Pedwali 26th December 2025 Watch Online
 https://raw.githubusercontent.com/Git-User-md/playlist/main/m3u8_files/and_tv/gharwali_pedwali/Gharwali_Pedwali_26th_December_2025_Watch_Online.m3u8
 
+#EXTINF:-1 group-title="zee_tv/ganga_mayi_ki_betiyan",Ganga Mayi Ki Betiyan 27th December 2025 Watch Online
+https://raw.githubusercontent.com/Git-User-md/playlist/main/m3u8_files/zee_tv/ganga_mayi_ki_betiyan/Ganga_Mayi_Ki_Betiyan_27th_December_2025_Watch_Online.m3u8
+
 #EXTINF:-1 group-title="zee_tv/ganga_mayi_ki_betiyan",Ganga Mayi Ki Betiyan 26th December 2025 Watch Online
 https://raw.githubusercontent.com/Git-User-md/playlist/main/m3u8_files/zee_tv/ganga_mayi_ki_betiyan/Ganga_Mayi_Ki_Betiyan_26th_December_2025_Watch_Online.m3u8
 
@@ -128,6 +137,9 @@ https://raw.githubusercontent.com/Git-User-md/playlist/main/m3u8_files/zee_tv/ga
 
 #EXTINF:-1 group-title="zee_tv/ganga_mayi_ki_betiyan",Ganga Mayi Ki Betiyan 20th December 2025 Watch Online
 https://raw.githubusercontent.com/Git-User-md/playlist/main/m3u8_files/zee_tv/ganga_mayi_ki_betiyan/Ganga_Mayi_Ki_Betiyan_20th_December_2025_Watch_Online.m3u8
+
+#EXTINF:-1 group-title="sab_tv/ganesh_kartikey",Ganesh Kartikey 27th December 2025 Watch Online
+https://raw.githubusercontent.com/Git-User-md/playlist/main/m3u8_files/sab_tv/ganesh_kartikey/Ganesh_Kartikey_27th_December_2025_Watch_Online.m3u8
 
 #EXTINF:-1 group-title="sab_tv/ganesh_kartikey",Ganesh Kartikey 26th December 2025 Watch Online
 https://raw.githubusercontent.com/Git-User-md/playlist/main/m3u8_files/sab_tv/ganesh_kartikey/Ganesh_Kartikey_26th_December_2025_Watch_Online.m3u8
