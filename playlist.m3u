@@ -39,6 +39,9 @@ https://raw.githubusercontent.com/Git-User-md/playlist/main/m3u8_files/sab_tv/ta
 #EXTINF:-1 group-title="sab_tv/taarak_mehta_ka_ooltah_chashmah",Taarak Mehta Ka Ooltah Chashmah 20th December 2025 Watch Online
 https://raw.githubusercontent.com/Git-User-md/playlist/main/m3u8_files/sab_tv/taarak_mehta_ka_ooltah_chashmah/Taarak_Mehta_Ka_Ooltah_Chashmah_20th_December_2025_Watch_Online.m3u8
 
+#EXTINF:-1 group-title="zee_tv/saru",Saru 27th December 2025 Watch Online
+https://raw.githubusercontent.com/Git-User-md/playlist/main/m3u8_files/zee_tv/saru/Saru_27th_December_2025_Watch_Online.m3u8
+
 #EXTINF:-1 group-title="zee_tv/saru",Saru 26th December 2025 Watch Online
 https://raw.githubusercontent.com/Git-User-md/playlist/main/m3u8_files/zee_tv/saru/Saru_26th_December_2025_Watch_Online.m3u8
 
@@ -77,6 +80,9 @@ https://raw.githubusercontent.com/Git-User-md/playlist/main/m3u8_files/sab_tv/pu
 
 #EXTINF:-1 group-title="sab_tv/pushpa_impossible",Pushpa Impossible 20th December 2025 Watch Online
 https://raw.githubusercontent.com/Git-User-md/playlist/main/m3u8_files/sab_tv/pushpa_impossible/Pushpa_Impossible_20th_December_2025_Watch_Online.m3u8
+
+#EXTINF:-1 group-title="zee_tv/ideabaaz",Ideabaaz 27th December 2025 Watch Online
+https://raw.githubusercontent.com/Git-User-md/playlist/main/m3u8_files/zee_tv/ideabaaz/Ideabaaz_27th_December_2025_Watch_Online.m3u8
 
 #EXTINF:-1 group-title="zee_tv/ideabaaz",Ideabaaz 21st December 2025 Watch Online
 https://raw.githubusercontent.com/Git-User-md/playlist/main/m3u8_files/zee_tv/ideabaaz/Ideabaaz_21st_December_2025_Watch_Online.m3u8
