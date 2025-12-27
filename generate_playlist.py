@@ -60,11 +60,11 @@ def main():
 
         channel = m3u8.parents[-3].name
         show = m3u8.parents[-2].name
+        group_title = f"{channel}/{show}"
         title = m3u8.stem.replace("_", " ")
 
         entries.append({
-            "channel": channel,
-            "show": show,
+            "group": group_title,
             "title": title,
             "url": raw_url(m3u8)
         })
@@ -75,7 +75,7 @@ def main():
         f.write("#EXTM3U\n\n")
         for e in entries:
             f.write(
-                f'#EXTINF:-1 group-title="{e["channel"]}",'
+                f'#EXTINF:-1 group-title="{e["group"]}",'
                 f'{e["title"]}\n'
             )
             f.write(e["url"] + "\n\n")
