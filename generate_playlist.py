@@ -8,8 +8,8 @@ from datetime import datetime, timedelta
 BASE_DIR = Path("m3u8_files")
 OUTPUT_M3U = Path("playlist.m3u")
 
-GITHUB_USER = "YOUR_USERNAME"
-GITHUB_REPO = "YOUR_REPO"
+GITHUB_USER = "Git-User-md"
+GITHUB_REPO = "playlist"
 GITHUB_BRANCH = "main"
 
 DAYS_LIMIT = 8
